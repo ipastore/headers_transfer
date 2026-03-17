@@ -2,19 +2,23 @@ import json
 import os
 import re
 import time
+from pathlib import Path
 
 from google import genai
-from google.genai import types
 from google.genai.errors import ServerError, ClientError
 from google.genai.types import GenerateContentConfig, ThinkingConfig
 from dotenv import load_dotenv
 from PIL import Image
 
-PRIMARY_MODEL = "gemini-2.5-flash"
-FALLBACK_MODEL = "gemini-3.1-flash-lite-preview"
-RETRY_DELAYS = [5, 15, 30, 60]  # seconds between attempts
-
 load_dotenv()
+
+# Load waterfall model list sorted by priority order
+_limits_path = Path(__file__).parent / "docs" / "GEMINI_usage_limits.json"
+with open(_limits_path) as _f:
+    _plan = json.load(_f)
+MODELS = [m["model_name"] for m in sorted(_plan["fallback_strategy"], key=lambda m: m["order"])]
+
+MAX_MINUTE_RETRIES = 3  # max sleeps per model before giving up on rate limit
 
 FIELDS = [
     "Name",
@@ -66,38 +70,14 @@ Rules:
 """.format(fields="\n".join(f'- "{f}"' for f in FIELDS))
 
 
-def _call_with_retry(client, model: str, image, final: bool = False):
-    """Try calling model with retries. Returns response or None (unless final=True, then raises)."""
-    for attempt, delay in enumerate(RETRY_DELAYS, 1):
-        try:
-            print(f"  Using model: {model}" if model != PRIMARY_MODEL else "", end="", flush=True)
-            return client.models.generate_content(
-                model=model,
-                contents=[PROMPT, image],
-                config=GenerateContentConfig(
-                    thinking_config=ThinkingConfig(thinking_budget=0)
-                ),
-            )
-        except (ServerError, ClientError) as e:
-            is_quota = isinstance(e, ClientError) and "RESOURCE_EXHAUSTED" in str(e)
-            if is_quota:
-                # Quota exhausted — no point retrying this model, switch immediately
-                print(f"  Quota exhausted [{model}].")
-                if final:
-                    raise RuntimeError(f"Quota exhausted on both {PRIMARY_MODEL} and {FALLBACK_MODEL}.") from e
-                print(f"  Falling back to {FALLBACK_MODEL}...")
-                return None
-            print(f"  Server busy [{model}] attempt {attempt}/{len(RETRY_DELAYS)}, retrying in {delay}s...")
-            time.sleep(delay)
-            if attempt == len(RETRY_DELAYS):
-                if final:
-                    raise RuntimeError(f"All retries exhausted on both {PRIMARY_MODEL} and {FALLBACK_MODEL}.") from e
-                print(f"  Falling back to {FALLBACK_MODEL}...")
-                return None
-
-
 def extract_fields(image_path: str, verbose: bool = False, use_fallback: bool = False) -> dict:
-    """Send image to Gemini Flash, return parsed dict of 30 fields."""
+    """Send image to Gemini, return parsed dict of 30 fields.
+
+    Waterfall strategy: tries models in order from GEMINI_usage_limits.json.
+    - PerMinute quota hit  → sleep 60 s, retry same model (up to MAX_MINUTE_RETRIES times).
+    - PerDay quota hit     → move immediately to next model in the list.
+    - All models drained   → raise RuntimeError.
+    """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise EnvironmentError("Set GEMINI_API_KEY in .env or environment.")
@@ -110,12 +90,52 @@ def extract_fields(image_path: str, verbose: bool = False, use_fallback: bool = 
         print(PROMPT)
         print("--------------")
 
-    if use_fallback:
-        print(f"  Using fallback model: {FALLBACK_MODEL}")
-        response = _call_with_retry(client, FALLBACK_MODEL, image, final=True)
+    models = MODELS[1:] if use_fallback else MODELS
+
+    model_idx = 0
+    while model_idx < len(models):
+        model = models[model_idx]
+        minute_retries = 0
+
+        while True:  # inner loop: retry same model on PerMinute errors
+            try:
+                if model != MODELS[0]:
+                    print(f"  Using model: {model}", flush=True)
+                response = client.models.generate_content(
+                    model=model,
+                    contents=[PROMPT, image],
+                    config=GenerateContentConfig(
+                        thinking_config=ThinkingConfig(thinking_budget=0)
+                    ),
+                )
+                break  # success — exit inner loop
+
+            except ClientError as e:
+                err = str(e)
+                if "RESOURCE_EXHAUSTED" in err:
+                    if "PerMinute" in err and minute_retries < MAX_MINUTE_RETRIES:
+                        minute_retries += 1
+                        print(f"  Rate limited [{model}] ({minute_retries}/{MAX_MINUTE_RETRIES}), sleeping 60s...")
+                        time.sleep(60)
+                    else:
+                        # PerDay exhausted, or PerMinute retries exceeded
+                        print(f"  Daily quota exhausted [{model}], switching to next model...")
+                        model_idx += 1
+                        break  # exit inner loop to pick next model
+                else:
+                    raise
+
+            except ServerError:
+                print(f"  Server busy [{model}], retrying in 30s...")
+                time.sleep(30)
+
+        else:
+            # Inner while exited normally (break on success)
+            break  # exit outer while — we have a response
+
     else:
-        response = _call_with_retry(client, PRIMARY_MODEL, image) \
-            or _call_with_retry(client, FALLBACK_MODEL, image, final=True)
+        raise RuntimeError("Critical: All free tier models exhausted for today.")
+
     raw = response.text
 
     if verbose:
