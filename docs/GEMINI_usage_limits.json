@@ -2,27 +2,27 @@
   "fallback_strategy": [
     {
       "order": 1,
-      "model_name": "gemini-3.1-flash-lite",
+      "model_name": "gemini-3.1-flash-lite-preview",
       "daily_limit": 500,
       "minute_limit": 15
     },
     {
       "order": 2,
+      "model_name": "gemini-2.5-flash-lite",
+      "daily_limit": 20,
+      "minute_limit": 10
+    },
+    {
+      "order": 3,
       "model_name": "gemini-3-flash",
       "daily_limit": 20,
       "minute_limit": 5
     },
     {
-      "order": 3,
+      "order": 4,
       "model_name": "gemini-2.5-flash",
       "daily_limit": 20,
       "minute_limit": 20
-    },
-    {
-      "order": 4,
-      "model_name": "gemini-2.5-flash-lite",
-      "daily_limit": 20,
-      "minute_limit": 10
     }
   ]
 }
