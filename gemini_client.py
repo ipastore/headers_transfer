@@ -92,14 +92,13 @@ def extract_fields(image_path: str, verbose: bool = False, use_fallback: bool = 
 
     models = MODELS[1:] if use_fallback else MODELS
 
-    model_idx = 0
-    while model_idx < len(models):
-        model = models[model_idx]
+    response = None
+    for model_idx, model in enumerate(models):
         minute_retries = 0
 
         while True:  # inner loop: retry same model on PerMinute errors
             try:
-                if model != MODELS[0]:
+                if model != models[0]:
                     print(f"  Using model: {model}", flush=True)
                 response = client.models.generate_content(
                     model=model,
@@ -120,7 +119,6 @@ def extract_fields(image_path: str, verbose: bool = False, use_fallback: bool = 
                     else:
                         # PerDay exhausted, or PerMinute retries exceeded
                         print(f"  Daily quota exhausted [{model}], switching to next model...")
-                        model_idx += 1
                         break  # exit inner loop to pick next model
                 else:
                     raise
@@ -129,11 +127,10 @@ def extract_fields(image_path: str, verbose: bool = False, use_fallback: bool = 
                 print(f"  Server busy [{model}], retrying in 30s...")
                 time.sleep(30)
 
-        else:
-            # Inner while exited normally (break on success)
-            break  # exit outer while — we have a response
+        if response is not None:
+            break  # got a response — exit model loop
 
-    else:
+    if response is None:
         raise RuntimeError("Critical: All free tier models exhausted for today.")
 
     raw = response.text
