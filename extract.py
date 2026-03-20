@@ -20,7 +20,10 @@ import os
 import sys
 
 from gemini_client import extract_fields
+from position_mapper import convert_fields, load_map
 from xlsx_manager import HEADERS, append_row, reset_rows
+
+_POSITION_MAP = load_map()
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
@@ -41,6 +44,7 @@ def process(image_path: str, output: str, dry_run: bool, verbose: bool, use_fall
     print(f"\nSending {os.path.basename(image_path)} to Gemini...")
     try:
         data = extract_fields(image_path, verbose=verbose, use_fallback=use_fallback)
+        data = convert_fields(data, _POSITION_MAP)
     except EnvironmentError as e:
         print(f"Error: {e}", file=sys.stderr)
         return False

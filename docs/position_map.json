@@ -1,0 +1,20 @@
+{
+  "B11": {
+    "Goalkeeper": "PT",
+    "Sweeper": "DFC",
+    "Centre Back": "DFD",
+    "Right Back": "LD",
+    "Left Back": "LI",
+    "Right Wing Back": "CAD",
+    "Left Wing Back": "CAI",
+    "Holding Midfielder": "MCD",
+    "Centre Midfielder": "MC",
+    "Right Midfielder": "MD",
+    "Left Midfielder": "MI",
+    "Attacking Midfielder": "MP",
+    "Right Winger": "ED",
+    "Left Winger": "EI",
+    "Second Striker": "SD",
+    "Striker": "DC"
+  }
+}
